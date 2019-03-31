@@ -1,4 +1,4 @@
-import urllib
+import urllib.request
 import os.path
 import zipfile
 import numpy as np
@@ -20,7 +20,7 @@ class ElevationProvider(object):
     def download_tile(tile_name, dir_name):
         url = "http://srtm.csi.cgiar.org/wp-content/uploads/files/srtm_5x5/ASCII/" + tile_name + ".zip"
         file_name = os.path.join(dir_name, tile_name + ".zip")
-        urllib.urlretrieve(url, file_name)
+        urllib.request.urlretrieve(url, file_name)
 
 
 class ElevationTile(object):
@@ -101,15 +101,6 @@ class FileElevationProvider(ElevationProvider):
             return -9999
 
 
-class SqliteElevationProvider(ElevationProvider):
-
-    def __init__(self, database):
-        self.db_file = database
-
-    def get_elevation(self, latitude, longitude):
-        return -9999
-
-
 if __name__ == "__main__":
-    elevation = FileElevationProvider("/Users/jpf/data/srtm/ascii")
+    elevation = FileElevationProvider("C:\\Users\\joaof\\source\\data\\srtm\\ascii")
     print(elevation.get_elevation(34.1225696, -118.2181179))
