@@ -1,8 +1,6 @@
 import urllib.request
 import os.path
-import tempfile
 import zipfile
-import sqlite3
 import numpy as np
 import math
 import joblib
