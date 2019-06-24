@@ -1,8 +1,11 @@
-import urllib
+import urllib.request
 import os.path
+import tempfile
 import zipfile
+import sqlite3
 import numpy as np
 import math
+import joblib
 
 
 class ElevationProvider(object):
@@ -11,30 +14,60 @@ class ElevationProvider(object):
         pass
 
     @staticmethod
-    def get_tile_name(latitude, longitude):
+    def get_tile_xy(latitude, longitude):
         x = int((longitude + 180.0) / 5.0) + 1
         y = int(-latitude / 5.0) + 12
+        return x, y
+
+    @staticmethod
+    def get_tile_name_xy(x, y):
         return "srtm_{0:02d}_{1:02d}".format(x, y)
+
+    def get_tile_name(self, latitude, longitude):
+        x, y = self.get_tile_xy(latitude, longitude)
+        return self.get_tile_name_xy(x, y)
 
     @staticmethod
     def download_tile(tile_name, dir_name):
-        url = "http://srtm.csi.cgiar.org/wp-content/uploads/files/srtm_5x5/ASCII/" + tile_name + ".zip"
-        file_name = os.path.join(dir_name, tile_name + ".zip")
-        urllib.urlretrieve(url, file_name)
+        zip_name = tile_name + ".zip"
+        url = "http://srtm.csi.cgiar.org/wp-content/uploads/files/" \
+              "srtm_5x5/ASCII/" + zip_name
+        file_name = os.path.join(dir_name, zip_name)
+        urllib.request.urlretrieve(url, file_name)
+        return file_name
 
 
 class ElevationTile(object):
 
-    def __init__(self, rows, cols, x_ll, y_ll, cell_size):
-        self.array = np.zeros((rows, cols), dtype=np.int32)
+    def __init__(self, rows, cols, x_ll, y_ll, cell_size, x=-1, y=-1):
+        self.array = None
+        self.rows = rows
+        self.cols = cols
         self.x_ll = x_ll
         self.y_ll = y_ll
         self.cell_size = cell_size
+        self.x = x
+        self.y = y
+
+    def get_row_col(self, latitude, longitude):
+        row = self.rows - math.trunc((latitude - self.y_ll) /
+                                     self.cell_size + 0.5)
+        col = math.trunc((longitude - self.x_ll) / self.cell_size + 0.5)
+        return row, col
 
     def get_elevation(self, latitude, longitude):
-        row = math.trunc((latitude - self.y_ll) / self.cell_size + 0.5)
-        col = math.trunc((longitude - self.x_ll) / self.cell_size + 0.5)
-        return self.array[self.array.shape[0] - row, col]
+        row, col = self.get_row_col(latitude, longitude)
+        return self.array[row, col]
+
+    def create_array(self):
+        if self.array is None:
+            self.array = np.zeros((self.rows, self.cols), dtype=np.int32)
+
+    def get_tile_xy(self):
+        return self.x * 100 + self.y
+
+    def get_xy(self, x, y):
+        return x * self.cols + y
 
 
 class FileElevationProvider(ElevationProvider):
@@ -66,14 +99,14 @@ class FileElevationProvider(ElevationProvider):
         tile = ElevationTile(rows, cols, x_ll, y_ll, cell)
 
         # Read in all the elevation values
+        tile.create_array()
         for i in range(6, len(content)):
             line = content[i].decode("utf-8")
-            items = line.split()
-            row = np.array(list(map(int, items)))
+            row = np.fromstring(line, dtype=np.int16, count=cols, sep=' ')
             tile.array[i - 6, :] = row
         return tile
 
-    def get_tile(self, tile_name):
+    def get_tile(self, tile_name: str) -> ElevationTile:
         tile = None
         if tile_name in self.tile_dict:
             tile = self.tile_dict[tile_name]
@@ -101,15 +134,36 @@ class FileElevationProvider(ElevationProvider):
             return -9999
 
 
-class SqliteElevationProvider(ElevationProvider):
+class JoblibElevationProvider(FileElevationProvider):
 
-    def __init__(self, database):
-        self.db_file = database
+    def __init__(self, cache_dir):
+        super().__init__(cache_dir)
 
-    def get_elevation(self, latitude, longitude):
-        return -9999
+    def get_tile(self, tile_name: str) -> ElevationTile:
+        if tile_name in self.tile_dict:
+            tile = self.tile_dict[tile_name]
+        else:
+            elev_file_name = os.path.join(self.cache_dir, tile_name + ".elev")
+
+            if not os.path.exists(elev_file_name):
+                self.download_tile(tile_name, self.cache_dir)
+
+                file_name = os.path.join(self.cache_dir, tile_name + ".zip")
+                with zipfile.ZipFile(file_name) as z:
+                    with z.open(tile_name + ".asc") as asc:
+                        content = asc.readlines()
+                        tile = self.parse_text(content)
+                        self.tile_dict[tile_name] = tile
+                os.remove(file_name)
+                joblib.dump(tile, elev_file_name)
+            else:
+                tile = joblib.load(elev_file_name)
+        return tile
 
 
 if __name__ == "__main__":
-    elevation = FileElevationProvider("/Users/jpf/data/srtm/ascii")
+    elevation = JoblibElevationProvider("/Users/joafigu/data/srtm/ascii")
+    # elevation = SqliteElevationProvider("/Users/jpf/data/srtm.sqlite")
     print(elevation.get_elevation(34.1225696, -118.2181179))
+    print(elevation.get_elevation(34.0095999, -117.53678559999999))
+    print(elevation.get_elevation(37.6047911, -122.0384952))
