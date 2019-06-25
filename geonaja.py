@@ -160,8 +160,7 @@ class JoblibElevationProvider(FileElevationProvider):
 
 
 if __name__ == "__main__":
-    elevation = JoblibElevationProvider("/Users/joafigu/data/srtm/ascii")
-    # elevation = SqliteElevationProvider("/Users/jpf/data/srtm.sqlite")
+    elevation = JoblibElevationProvider(".")
     print(elevation.get_elevation(34.1225696, -118.2181179))
     print(elevation.get_elevation(34.0095999, -117.53678559999999))
     print(elevation.get_elevation(37.6047911, -122.0384952))
