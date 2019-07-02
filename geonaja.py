@@ -5,28 +5,58 @@ import numpy as np
 import math
 import joblib
 
+from typing import List
+
 
 class ElevationProvider(object):
+    """Base elevation provider class"""
 
     def __init__(self):
         pass
 
     @staticmethod
-    def get_tile_xy(latitude, longitude):
+    def get_tile_xy(latitude: float,
+                    longitude: float) -> (int, int):
+        """
+        Given the location's latitude and longitude, return the corresponding
+        elevation tile coordinates.
+        :param latitude: Location latitude in decimal degrees
+        :param longitude: Location longitude in decimal degrees
+        :return: Tuple containing the elevation tile coordinates
+        """
         x = int((longitude + 180.0) / 5.0) + 1
         y = int(-latitude / 5.0) + 12
         return x, y
 
     @staticmethod
-    def get_tile_name_xy(x, y):
+    def get_tile_name_xy(x: int, y: int) -> str:
+        """
+        Given the elevation tile coordinates, return the tile name.
+        :param x: Elevation tile x coordinate
+        :param y: Elevation tile y coordinate
+        :return: Elevation tile file file name
+        """
         return "srtm_{0:02d}_{1:02d}".format(x, y)
 
-    def get_tile_name(self, latitude, longitude):
+    def get_tile_name(self, latitude: float, longitude: float) -> str:
+        """
+        Given the location's latitude and longitude, return the corresponding
+        elevation tile file name.
+        :param latitude: Location latitude in decimal degrees
+        :param longitude: Location longitude in decimal degrees
+        :return: Elevation tile file name
+        """
         x, y = self.get_tile_xy(latitude, longitude)
         return self.get_tile_name_xy(x, y)
 
     @staticmethod
-    def download_tile(tile_name, dir_name):
+    def download_tile(tile_name: str, dir_name: str) -> str:
+        """
+        Downloads an elevation tile into a cache directory.
+        :param tile_name: Elevation tile file name
+        :param dir_name: Cache directory
+        :return: Local file name
+        """
         zip_name = tile_name + ".zip"
         url = "http://srtm.csi.cgiar.org/wp-content/uploads/files/" \
               "srtm_5x5/ASCII/" + zip_name
@@ -36,6 +66,9 @@ class ElevationProvider(object):
 
 
 class ElevationTile(object):
+    """
+    Elevation tile - contains all the information of an elevation tile file
+    """
 
     def __init__(self, rows, cols, x_ll, y_ll, cell_size, x=-1, y=-1):
         self.array = None
@@ -47,35 +80,56 @@ class ElevationTile(object):
         self.x = x
         self.y = y
 
-    def get_row_col(self, latitude, longitude):
+    def get_row_col(self,
+                    latitude: float,
+                    longitude: float) -> (int, int):
+        """
+        Given the location's latitude and longitude, return the corresponding
+        elevation tile cell coordinates.
+        :param latitude: Location latitude in decimal degrees
+        :param longitude: Location longitude in decimal degrees
+        :return: The array coordinates of the elevation value
+        """
         row = self.rows - math.trunc((latitude - self.y_ll) /
                                      self.cell_size + 0.5)
         col = math.trunc((longitude - self.x_ll) / self.cell_size + 0.5)
         return row, col
 
-    def get_elevation(self, latitude, longitude):
+    def get_elevation(self,
+                      latitude: float,
+                      longitude: float) -> np.int32:
+        """
+        Gets the elevation of the tile element corresponding to the given
+        location's latitude and longitude.
+        :param latitude: Location latitude in decimal degrees
+        :param longitude: Location longitude in decimal degrees
+        :return:
+        """
         row, col = self.get_row_col(latitude, longitude)
         return self.array[row, col]
 
     def create_array(self):
+        """
+        Creates the elevation array
+        :return: None
+        """
         if self.array is None:
             self.array = np.zeros((self.rows, self.cols), dtype=np.int32)
 
-    def get_tile_xy(self):
-        return self.x * 100 + self.y
-
-    def get_xy(self, x, y):
-        return x * self.cols + y
-
 
 class FileElevationProvider(ElevationProvider):
+    """
+    A simple elevation provider that does not preprocess the downloaded tiles.
+    Tile files are stored as the original zipped trio of files, and decoded
+    upon file load. This process is slow when loading from file.
+    """
 
     def __init__(self, cache_dir):
         self.cache_dir = cache_dir
         self.tile_dict = {}
 
     @staticmethod
-    def parse_text(content):
+    def parse_text(content: List[str]) -> ElevationTile:
         rows = 0
         cols = 0
         x_ll = 0.0
@@ -105,6 +159,11 @@ class FileElevationProvider(ElevationProvider):
         return tile
 
     def get_tile(self, tile_name: str) -> ElevationTile:
+        """
+        Retrieves the tile, either from the web or any of the caches.
+        :param tile_name: Elevation tile name.
+        :return: Elevation tile
+        """
         tile = None
         if tile_name in self.tile_dict:
             tile = self.tile_dict[tile_name]
@@ -122,7 +181,16 @@ class FileElevationProvider(ElevationProvider):
                         self.tile_dict[tile_name] = tile
         return tile
 
-    def get_elevation(self, latitude, longitude):
+    def get_elevation(self,
+                      latitude: float,
+                      longitude: float) -> int:
+        """
+        Given a location latitude and longitude, retrieve the average elevation
+        in meters. This is the main entry point for the whole feature.
+        :param latitude: Location latitude in decimal degrees
+        :param longitude: Location longitude in decimal degrees
+        :return:
+        """
         tile_name = self.get_tile_name(latitude, longitude)
 
         tile = self.get_tile(tile_name)
@@ -133,11 +201,24 @@ class FileElevationProvider(ElevationProvider):
 
 
 class JoblibElevationProvider(FileElevationProvider):
+    """
+    A more sophisticated elevation provider that preprocesses the downloaded
+    elevation tiles and saves them to cache using the Joblib package.
+    By avoiding the decompressing and decoding steps when loading from file,
+    this class achieves much better performance. Note that when downloading
+    a tile for the first time, the performance penalty is slightly higher than
+    the previous one.
+    """
 
     def __init__(self, cache_dir):
         super().__init__(cache_dir)
 
     def get_tile(self, tile_name: str) -> ElevationTile:
+        """
+        Retrieves the tile, either from the web or any of the caches.
+        :param tile_name: Elevation tile name.
+        :return: Elevation tile
+        """
         if tile_name in self.tile_dict:
             tile = self.tile_dict[tile_name]
         else:
